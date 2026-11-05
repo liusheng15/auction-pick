@@ -12,7 +12,9 @@ pro = ts.pro_api(TUSHARE_TOKEN)
 
 def get_auction_data():
     # 这里以获取股票竞价快照为例，实际可根据需求调整
-    df = pro.stk_auction(
+    df = pro.daily(ts_code='000001.SZ', start_date='20240101', end_date='20240105')
+print(df)
+
         trade_date='20250218', 
         fields='ts_code,trade_date,vol,price,amount,turnover_rate,volume_ratio'
     )
