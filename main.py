@@ -4,7 +4,7 @@ import requests
 import json
 
 # 初始化 Tushare
-ts.set_token("你的TOKEN") 
+ts.set_token("在这里换成你自己的TUSHARE_TOKEN")
 pro = ts.pro_api()
 
 # 测试基础日线接口
