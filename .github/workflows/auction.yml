@@ -1,9 +1,7 @@
 name: Run Auction Pick
 
 on:
-  schedule:
-    - cron: '0 10 * * *'  # 定时运行（UTC时间10点，即北京时间18点）
-  workflow_dispatch:      # 允许在网页上手动点击运行测试
+  workflow_dispatch:
 
 jobs:
   build:
@@ -23,5 +21,6 @@ jobs:
 
       - name: Run script
         env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         run: python main.py
