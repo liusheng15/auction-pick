@@ -1,27 +1,29 @@
-name名称: 每日拍卖数据推送
+name: auction
 
-on:开启:
-  schedule:
-    - cron: "0 7 * * *"  # 每天UTC时间7点（北京时间15点）自动运行
-  workflow_dispatch:      # 允许手动触发
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   build:
-    runs-on: ubuntu-latest运行环境: ubuntu-latest
-    steps:步骤步骤:步骤:
-      - name: 拉取代码      - 名称: 拉取代码
-        uses: actions/checkout@v3使用: actions/checkout@v3
+    runs-on: ubuntu-latest
+    steps:步骤:
+      - name: Checkout code      - 名称: 结账代码
+        uses: actions/checkout@v4
 
-      - name: 设置Python环境
+      - name: Set up Python      - 名称: 设置 Python - 名称: 设置 Python - 名称: 设置 Python - 名称: 设置 Python - 名称: 设置 Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.9"
+          python-version: '3.10'
 
-      - name: 安装依赖      - 名称: 安装依赖
-        run: pip install -r requirements.txt运行: 运行 ip install -r requirements.txt: pip install -r requirements.txt
+      - name: I我我nstall dependencies      - 名称: 安装依赖
+        run运行: |运行: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: 运行脚本
+      - name: Run auction pick      - 名称: 运未竞拍选中 - 名称: 运未竞拍选中 - 名称: 运行拍卖挑选 - 名称: 运行拍卖选择
         env:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-        run: python main.py运行: 运运行 python main.py: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运行 python main.py: 运行 python main.py: 运运行 python main.py: 运运行 python main.py: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运行 python main.py: python main.py
+        run: python main.py运行: 运运行 python main.py: 运运行: python main.py运行: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运行 python main.py: 运运行 python main.py: 运运行 python main.py: 运行 python main.py: 运运行 python main.py: 运运行 python main.py: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运行 python main.py: python main.py
