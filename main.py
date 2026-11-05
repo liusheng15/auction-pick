@@ -4,7 +4,7 @@ import requests
 import json
 
 # 初始化 Tushare
-ts.set_token("在这里换成你自己的TUSHARE_TOKEN")
+ts.set_token(os.environ.get('TUSHARE_TOKEN'))
 pro = ts.pro_api()
 
 # 测试基础日线接口
@@ -14,6 +14,7 @@ print(df)
 # --- 推送结果到微信 (Pushplus) ---
 content = df.head(10).to_string()
 token = os.environ.get('PUSHPLUS_TOKEN')
+
 if token:
     url = "https://www.pushplus.plus/send"
     data = {
@@ -23,4 +24,8 @@ if token:
         "template": "markdown"
     }
     headers = {'Content-Type': 'application/json'}
-    requests.post(url, data=json.dumps(data).encode(encoding='utf-8'), headers=headers)
+    response = requests.post(url, headers=headers, data=json.dumps(data).encode(encoding='utf-8'))
+    print("推送状态码:", response.status_code)
+    print("推送返回结果:", response.text)
+else:
+    print("错误：未检测到 PUSHPLUS_TOKEN 环境变量！")
