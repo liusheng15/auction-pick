@@ -20,8 +20,13 @@ print(df)
 token = os.environ.get('PUSHPLUS_TOKEN')
 
 if token:
-    # 把数据转成 HTML 表格
-    table_html = df.head(10).to_html(index=False, border=1, justify='center')
+    # 优化1：把浮点数（价格、涨跌幅等）限制为保留2位小数，防止数字太长挤爆手机屏幕
+    table_html = df.head(10).to_html(
+        index=False, 
+        border=1, 
+        justify='center',
+        float_format='%.2f'
+    )
     
     url = "https://www.pushplus.plus/send"
     data = {
@@ -30,7 +35,14 @@ if token:
         "content": f"""
         <h3>数据抓取成功！</h3>
         <p>以下是前10条记录：</p>
+        <!-- 优化2：加入CSS样式，强制表格内容不折行，并允许横向滑动 -->
+        <div style="overflow-x: auto;">
+        <style>
+            table {{ border-collapse: collapse; width: 100%; }}
+            th, td {{ border: 1px solid #ddd; padding: 4px; white-space: nowrap; }}
+        </style>
         {table_html}
+        </div>
         <p><small>由 GitHub Actions 自动推送</small></p>
         """,
         "template": "html"
