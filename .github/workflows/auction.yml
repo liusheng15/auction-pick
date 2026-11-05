@@ -1,0 +1,27 @@
+name名称: 每日拍卖数据推送
+
+on:开启:
+  schedule:
+    - cron: "0 7 * * *"  # 每天UTC时间7点（北京时间15点）自动运行
+  workflow_dispatch:      # 允许手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest运行环境: ubuntu-latest
+    steps:步骤步骤:步骤:
+      - name: 拉取代码      - 名称: 拉取代码
+        uses: actions/checkout@v3使用: actions/checkout@v3
+
+      - name: 设置Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: 安装依赖      - 名称: 安装依赖
+        run: pip install -r requirements.txt运行: 运行 ip install -r requirements.txt: pip install -r requirements.txt
+
+      - name: 运行脚本
+        env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: python main.py运行: 运运行 python main.py: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运行 python main.py: 运行 python main.py: 运运行 python main.py: 运运行 python main.py: 运行 python main.py: 运运行 python main.py: 运行 python main.py: 运行 python main.py: python main.py
