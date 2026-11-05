@@ -1,7 +1,9 @@
 name: Run Auction Pick
 
 on:
-  workflow_dispatch:
+  schedule:
+    - cron: '30 12 * * 1-5'   # 工作日 北京时间 20:30 自动跑
+  workflow_dispatch:          # 保留手动触发按钮
 
 jobs:
   build:
@@ -17,7 +19,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install tushare requests
+          pip install tushare requests pandas numpy
 
       - name: Run script
         env:
