@@ -12,6 +12,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: 缓存股票数据
+        uses: actions/cache@v4
+        with:
+          path: |
+            basic_cache.csv
+            .cache/
+            *.pkl
+          key: ${{ runner.os }}-stock-data-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-stock-data-
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
