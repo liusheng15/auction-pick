@@ -1,0 +1,15 @@
+name: Test Push测试推送
+on:
+  workflow_dispatch:
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:步骤:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:使用:
+          python-version: '3.11'python版本: '3.11'
+      - run: pip install requests
+      - run: python test_push.py
+        env:环境:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
