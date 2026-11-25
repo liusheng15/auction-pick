@@ -1,7 +1,7 @@
-import os, time, traceback, tushare as ts, pandas as pd, requests
+import os, time, json, traceback, tushare as ts, pandas as pd, requests
 
 print("TUSHARE_TOKEN 长度:", len(os.environ.get('TUSHARE_TOKEN','')))
-print("版本: 最终版 20261125-v5 (内置行业梯队 + 控频 + 推送抓错)")
+print("版本: 20261125-v6 (行业梯队 + 控频 + 推送写法同test_push)")
 pro = ts.pro_api(os.environ.get('TUSHARE_TOKEN'))
 TODAY = time.strftime('%Y%m%d')
 CACHE = '.cache'; os.makedirs(CACHE, exist_ok=True)
@@ -70,37 +70,37 @@ INDUSTRY_MAP = {
 "600460.SH":"半导体","600475.SH":"环保","600480.SH":"汽车零部件","600482.SH":"船舶制造",
 "600487.SH":"通信设备","600498.SH":"通信设备","600519.SH":"白酒","600522.SH":"通信设备",
 "600528.SH":"工程机械","600535.SH":"中药","600536.SH":"软件服务","600547.SH":"有色",
-"600549.SH":"小金属","570.SH":"x",
-"600570.SH":"软件服务","600584.SH":"半导体","600585.SH":"建筑材料","600588.SH":"软件服务",
-"600598.SH":"农牧饲渔","600600.SH":"饮料乳品","600612.SH":"珠宝首饰","600660.SH":"汽车零部件",
-"600663.SH":"房地产","600690.SH":"家电","600702.SH":"白酒","600703.SH":"半导体",
-"600718.SH":"软件服务","600732.SH":"光伏设备","600733.SH":"汽车整车","600741.SH":"汽车零部件",
-"600745.SH":"半导体","600754.SH":"酒店餐饮","600760.SH":"军工","600761.SH":"工程机械",
-"600763.SH":"医疗服务","600779.SH":"白酒","600795.SH":"电力","600809.SH":"白酒",
-"600812.SH":"化学制药","600837.SH":"证券","600839.SH":"家电","600859.SH":"零售",
-"600887.SH":"饮料乳品","600893.SH":"航天装备","600900.SH":"电力","600905.SH":"风电设备",
-"601088.SH":"煤炭","601111.SH":"机场航运","601138.SH":"消费电子","601166.SH":"银行",
-"601211.SH":"证券","601225.SH":"煤炭","601288.SH":"银行","601318.SH":"保险",
-"601328.SH":"银行","601336.SH":"保险","601360.SH":"软件服务","601398.SH":"银行",
-"601601.SH":"保险","601628.SH":"保险","601633.SH":"汽车整车","601668.SH":"工程建设",
-"601688.SH":"证券","601698.SH":"航天装备","601766.SH":"轨道交通","601800.SH":"工程建设",
-"601857.SH":"石化","601888.SH":"旅游零售","601899.SH":"有色","601939.SH":"银行",
-"601988.SH":"银行","601989.SH":"船舶制造","603000.SH":"文化传媒","603019.SH":"计算机设备",
-"603027.SH":"食品加工","603039.SH":"软件服务","603086.SH":"农药","603096.SH":"文化传媒",
-"603156.SH":"饮料乳品","603160.SH":"半导体","603185.SH":"光伏设备","603198.SH":"白酒",
-"603259.SH":"医疗研发外包","603288.SH":"食品加工","603290.SH":"半导体","603345.SH":"食品加工",
-"603369.SH":"白酒","603444.SH":"游戏","603486.SH":"家电","603501.SH":"半导体",
-"603517.SH":"休闲食品","603588.SH":"环保","603596.SH":"汽车零部件","603605.SH":"个护用品",
-"603606.SH":"电网设备","603613.SH":"互联网服务","603659.SH":"电池","603666.SH":"军工",
-"603678.SH":"军工电子","603686.SH":"环保","603799.SH":"小金属","603806.SH":"光伏设备",
-"603816.SH":"家居用品","603833.SH":"家居用品","603858.SH":"中药","603866.SH":"休闲食品",
-"603882.SH":"医疗服务","603883.SH":"医药商业","603885.SH":"机场航运","603893.SH":"半导体",
-"603899.SH":"文娱用品","603920.SH":"半导体","603927.SH":"软件服务","603960.SH":"汽车整车",
-"603986.SH":"半导体","603993.SH":"小金属","603997.SH":"汽车零部件","603998.SH":"中药",
+"600549.SH":"小金属","600570.SH":"软件服务","600584.SH":"半导体","600585.SH":"建筑材料",
+"600588.SH":"软件服务","600598.SH":"农牧饲渔","600600.SH":"饮料乳品","600612.SH":"珠宝首饰",
+"600660.SH":"汽车零部件","600663.SH":"房地产","600690.SH":"家电","600702.SH":"白酒",
+"600703.SH":"半导体","600718.SH":"软件服务","600732.SH":"光伏设备","600733.SH":"汽车整车",
+"600741.SH":"汽车零部件","600745.SH":"半导体","600754.SH":"酒店餐饮","600760.SH":"军工",
+"600761.SH":"工程机械","600763.SH":"医疗服务","600779.SH":"白酒","600795.SH":"电力",
+"600809.SH":"白酒","600812.SH":"化学制药","600837.SH":"证券","600839.SH":"家电",
+"600859.SH":"零售","600887.SH":"饮料乳品","600893.SH":"航天装备","600900.SH":"电力",
+"600905.SH":"风电设备","601088.SH":"煤炭","601111.SH":"机场航运","601138.SH":"消费电子",
+"601166.SH":"银行","601211.SH":"证券","601225.SH":"煤炭","601288.SH":"银行",
+"601318.SH":"保险","601328.SH":"银行","601336.SH":"保险","601360.SH":"软件服务",
+"601398.SH":"银行","601601.SH":"保险","601628.SH":"保险","601633.SH":"汽车整车",
+"601668.SH":"工程建设","601688.SH":"证券","601698.SH":"航天装备","601766.SH":"轨道交通",
+"601800.SH":"工程建设","601857.SH":"石化","601888.SH":"旅游零售","601899.SH":"有色",
+"601939.SH":"银行","601988.SH":"银行","601989.SH":"船舶制造","603000.SH":"文化传媒",
+"603019.SH":"计算机设备","603027.SH":"食品加工","603039.SH":"软件服务","603086.SH":"农药",
+"603096.SH":"文化传媒","603156.SH":"饮料乳品","603160.SH":"半导体","603185.SH":"光伏设备",
+"603198.SH":"白酒","603259.SH":"医疗研发外包","603288.SH":"食品加工","603290.SH":"半导体",
+"603345.SH":"食品加工","603369.SH":"白酒","603444.SH":"游戏","603486.SH":"家电",
+"603501.SH":"半导体","603517.SH":"休闲食品","603588.SH":"环保","603596.SH":"汽车零部件",
+"603605.SH":"个护用品","603606.SH":"电网设备","603613.SH":"互联网服务","603659.SH":"电池",
+"603666.SH":"军工","603678.SH":"军工电子","603686.SH":"环保","603799.SH":"小金属",
+"603806.SH":"光伏设备","603816.SH":"家居用品","603833.SH":"家居用品","603858.SH":"中药",
+"603866.SH":"休闲食品","603882.SH":"医疗服务","603883.SH":"医药商业","603885.SH":"机场航运",
+"603893.SH":"半导体","603899.SH":"文娱用品","603920.SH":"半导体","603927.SH":"软件服务",
+"603960.SH":"汽车整车","603986.SH":"半导体","603993.SH":"小金属","603997.SH":"汽车零部件",
+"603998.SH":"中药",
 }
 
 def cached(key, fetcher, hours=6):
-    """带控频+限频重试+旧缓存兜底的通用拉取器"""
+    """控频 + 限频重试 + 旧缓存兜底"""
     path = f'{CACHE}/{key}.pkl'
     if os.path.exists(path):
         age = (time.time()-os.path.getmtime(path))/3600
@@ -110,7 +110,7 @@ def cached(key, fetcher, hours=6):
     last_err = None
     for attempt in range(4):
         try:
-            time.sleep(1.5)              # 控频：每分钟不超过40次
+            time.sleep(1.5)
             df = fetcher()
             df.to_pickle(path)
             print(f"[接口] {key} 拉取成功")
@@ -122,14 +122,14 @@ def cached(key, fetcher, hours=6):
                 time.sleep(20)
             else:
                 break
-    print(f"[失败] {key}: {str(last_err)[:50]}")
+    print(f"[失败] {key}: {str(last_err)[:60]}")
     if os.path.exists(path):
         print(f"[降级] {key} 用旧缓存")
         return pd.read_pickle(path)
     raise last_err
 
 try:
-    # ========= 1. 当日行情 + 基础指标（只调免费接口） =========
+    # ========= 1. 当日行情 + 基础指标 =========
     df = cached(f'daily_{TODAY}', lambda: pro.daily(trade_date=TODAY), hours=2)
     try:
         bk = cached(f'basic_{TODAY}', lambda: pro.daily_basic(trade_date=TODAY,
@@ -138,13 +138,13 @@ try:
     except Exception as e:
         print("daily_basic 不可用:", e)
 
-    # ========= 2. 代码前缀筛主板（沪60x + 深00x）+ 挂行业 =========
+    # ========= 2. 筛主板（沪60x + 深00x）+ 挂行业 =========
     df['is_main'] = df['ts_code'].str.match(r'^(60[0-3]|00[0-3])')
     df = df[df['is_main']].copy()
     df['industry'] = df['ts_code'].map(INDUSTRY_MAP)
     print("主板股票数:", len(df), " 有行业标签:", int(df['industry'].notna().sum()))
 
-    # ========= 3. 自己判断涨停（不调 limit_list_d） =========
+    # ========= 3. 自算涨停（不调 limit_list_d） =========
     df['is_limit'] = (df['pct_chg'] >= 9.5) & (abs(df['close']-df['high']) < 0.01)
     limit_today = df[df['is_limit']].copy()
     print("今日主板涨停(自算):", len(limit_today))
@@ -154,7 +154,7 @@ try:
     elif limit_cnt < 40:    mkt, mkt_rs = -1.5, "情绪低迷"
     else:                   mkt, mkt_rs = 0.0, "情绪中性"
 
-    # ========= 4. 行业梯队（只在当日涨停票内统计，零额外接口） =========
+    # ========= 4. 行业梯队（只在当日涨停票内统计） =========
     ind_cnt = limit_today.dropna(subset=['industry']).groupby('industry')['ts_code'].count()
     def ind_score(ind):
         if pd.isna(ind) or ind not in ind_cnt.index: return 0.0, "无梯队数据"
@@ -165,9 +165,10 @@ try:
     print("涨停梯队TOP:", dict(ind_cnt.sort_values(ascending=False).head(5)))
 
     if len(limit_today) == 0:
+        print("今日无涨停数据（可能盘中/非交易日），正常退出")
         raise SystemExit(0)
 
-    # ========= 5. 逐只打分（限频自动跳过，不中断） =========
+    # ========= 5. 逐只打分 =========
     rows = []
     for r in limit_today.itertuples():
         code = r.ts_code
@@ -176,6 +177,149 @@ try:
                 start_date=(pd.Timestamp.today()-pd.Timedelta(days=45)).strftime('%Y%m%d'),
                 end_date=TODAY).sort_values('trade_date').reset_index(drop=True), hours=1)
             if len(h) < 5:
+                continue
+            last = h.iloc[-1]
+
+            lt = 0
+            for i in range(len(h)-1, -1, -1):
+                row = h.iloc[i]
+                if row['pct_chg'] >= 9.5 and abs(row['close']-row['high']) < 0.01:
+                    lt += 1
+                else:
+                    break
+            if lt == 0:
+                lt = 1
+
+            s = 0.0; rs = []
+            mv = getattr(r, 'float_mv', None) or getattr(r, 'total_mv', None)
+            tr = getattr(r, 'turnover_rate', None)
+            cl = getattr(r, 'close', 0)
+            try:
+                vol_ma5 = h['vol'].tail(6).iloc[:-1].mean()
+            except Exception:
+                vol_ma5 = None
+
+            # ① 封板形态
+            if last['open']==last['close']==last['high']==last['low']:
+                s += 2.0; rs.append("一字板")
+            elif abs(last['open']-last['high'])<0.01 and abs(last['close']-last['high'])<0.01:
+                s += 1.6; rs.append("开盘秒板")
+            elif abs(last['close']-last['high'])<0.01:
+                s += 1.2; rs.append("光头板")
+            else:
+                s += 0.5; rs.append("普通板")
+
+            # ② 量能
+            if vol_ma5:
+                if last['vol'] < vol_ma5*0.8:    s += 1.5; rs.append("缩量惜售")
+                elif last['vol'] < vol_ma5*1.5:  s += 1.0
+                elif last['vol'] > vol_ma5*2.5:  s -= 0.5; rs.append("爆量分歧")
+
+            # ③ 换手
+            if tr is not None and not pd.isna(tr):
+                if 10 <= tr <= 25:     s += 1.0; rs.append("换手健康")
+                elif 5 <= tr < 10:     s += 0.6
+                elif 25 < tr <= 40:    s += 0.3
+                elif tr > 40:          s -= 0.5; rs.append("换手过大")
+
+            # ④ 行业梯队
+            i_sc, i_rs = ind_score(getattr(r, 'industry', None))
+            s += i_sc; rs.append(i_rs)
+
+            # ⑤ 市值
+            if mv is not None and not pd.isna(mv):
+                if 20 <= mv <= 50:     s += 1.0; rs.append("黄金市值")
+                elif 8 <= mv < 20:     s += 0.7
+                elif 50 <= mv <= 100:  s += 0.4
+                elif mv > 100:         s -= 0.3; rs.append("盘子大")
+            if cl and cl > 20:
+                s -= 0.3
+
+            # ⑥ 晋级位置
+            if lt >= 4:       s += 1.5; rs.append(f"{lt}板高标")
+            elif lt == 3:     s += 1.3; rs.append("3板")
+            elif lt == 2:     s += 0.9; rs.append("2板")
+            else:             s += 0.4; rs.append("首板")
+
+            # ⑦ 均线多头
+            if len(h) >= 20 and last['close'] > h['close'].tail(5).mean() > h['close'].tail(20).mean():
+                s += 1.0; rs.append("多头")
+
+            # ⑧ 市场环境
+            s += mkt
+
+            rows.append({'code': code, 'ind': getattr(r, 'industry', None),
+                         'close': round(float(cl), 2), 'lt': lt,
+                         'mv': round(float(mv)) if (mv is not None and not pd.isna(mv)) else 0,
+                         'score': round(min(max(s, 0), 10), 1), 'reason': '、'.join(rs)})
+            time.sleep(1.2)
+        except Exception as e:
+            print(f"[跳过] {code}: {str(e)[:50]}")
+            continue
+
+    print("打分完成, 候选数:", len(rows))
+    top = sorted(rows, key=lambda x: -x['score'])[:3]
+
+    # ========= 6. 推送（写法与 test_push.py 一致，已验证 code:200） =========
+    token = os.environ.get('PUSHPLUS_TOKEN')
+    print("PUSHPLUS_TOKEN 长度:", len(token) if token else 0)
+    if not token:
+        print("!! 未配置 PUSHPLUS_TOKEN")
+        raise SystemExit(0)
+
+    def grade(sc):
+        if sc >= 8:   return "🟢 重仓可上"
+        if sc >= 6.5: return "🟡 正常仓位"
+        if sc >= 5:   return "🟠 轻仓试错"
+        return "⚪ 空仓别上"
+
+    try:
+        if not top:
+            content = "<h3>📭 今日无连板候选</h3>"
+        else:
+            rows_html = ""
+            for i, x in enumerate(top, 1):
+                nm = x['ind'] if (x['ind'] and not pd.isna(x['ind'])) else x['code']
+                rows_html += (
+                    f"<tr><td>{i}</td><td>{nm}<br><small>{x['code']}</small></td>"
+                    f"<td>{x['close']}</td><td>{x['lt']}板</td><td>{x['mv']}亿</td>"
+                    f"<td><b>{x['score']}</b></td><td>{grade(x['score'])}</td>"
+                    f"<td>{x['reason']}</td></tr>"
+                )
+            content = (
+                f"<h3>🔥 连板晋级评分 · {TODAY}</h3>"
+                f"<p><small>涨停{limit_cnt}家 · {mkt_rs}｜候选{len(rows)}只｜非投资建议</small></p>"
+                f"<table style='border-collapse:collapse;width:100%'>"
+                f"<tr style='background:#f2f2f2'>"
+                f"<th style='border:1px solid #ddd;padding:6px'>#</th>"
+                f"<th style='border:1px solid #ddd;padding:6px'>股票/行业</th>"
+                f"<th style='border:1px solid #ddd;padding:6px'>收盘</th>"
+                f"<th style='border:1px solid #ddd;padding:6px'>连板</th>"
+                f"<th style='border:1px solid #ddd;padding:6px'>市值</th>"
+                f"<th style='border:1px solid #ddd;padding:6px'>分</th>"
+                f"<th style='border:1px solid #ddd;padding:6px'>建议</th>"
+                f"<th style='border:1px solid #ddd;padding:6px'>理由</th></tr>"
+                f"{rows_html}</table>"
+            )
+        resp = requests.post("https://www.pushplus.plus/send",
+            headers={'Content-Type': 'application/json'},
+            data=json.dumps({"token": token,
+                             "title": f"🔥 连板评分 · {TODAY} · {len(top)}只",
+                             "content": content, "template": "html"}).encode('utf-8'),
+            timeout=15)
+        print("状态码:", resp.status_code)
+        print("返回内容:", resp.text[:200])
+    except Exception as pe:
+        print("!!! 推送环节报错 !!!")
+        traceback.print_exc()
+
+    print("==== 全部完成 ====")
+
+except Exception as e:
+    print("!!! 顶层异常 !!!")
+    traceback.print_exc()
+    raise
+f len(h) < 5:
                 continue
             last = h.iloc[-1]
 
