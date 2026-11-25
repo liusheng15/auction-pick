@@ -1,7 +1,7 @@
 import os, time, json, traceback, tushare as ts, pandas as pd, requests
 
 print("TUSHARE_TOKEN 长度:", len(os.environ.get('TUSHARE_TOKEN','')))
-print("版本: 20261125-v7 (浅缩进·无外层try·手机友好)")
+print("版本: 20261125-v8 (连板共性条件: 市值/低位/换手/量能/梯队/股性/分阶段)")
 pro = ts.pro_api(os.environ.get('TUSHARE_TOKEN'))
 TODAY = time.strftime('%Y%m%d')
 CACHE = '.cache'; os.makedirs(CACHE, exist_ok=True)
@@ -140,7 +140,7 @@ df = df[df['is_main']].copy()
 df['industry'] = df['ts_code'].map(INDUSTRY_MAP)
 print("主板股票数:", len(df), " 有行业标签:", int(df['industry'].notna().sum()))
 
-# ===== 3. 自算涨停 =====
+# ===== 3. 自算涨停（pct_chg>=9.5 天然排除ST，ST涨停仅5%） =====
 df['is_limit'] = (df['pct_chg'] >= 9.5) & (abs(df['close']-df['high']) < 0.01)
 limit_today = df[df['is_limit']].copy()
 print("今日主板涨停(自算):", len(limit_today))
@@ -154,33 +154,35 @@ elif limit_cnt < 40:
 else:
     mkt, mkt_rs = 0.0, "情绪中性"
 
-# ===== 4. 行业梯队 =====
+# ===== 4. 行业梯队（同题材≥3涨停才认梯队，孤板淘汰） =====
 ind_cnt = limit_today.dropna(subset=['industry']).groupby('industry')['ts_code'].count()
 def ind_score(ind):
     if pd.isna(ind) or ind not in ind_cnt.index:
-        return 0.0, "无梯队数据"
+        return 0.0, "无梯队"
     c = int(ind_cnt[ind])
     if c >= 3:
         return 2.0, f"梯队{c}家"
     if c == 2:
-        return 1.2, "双龙"
-    return -0.8, "孤板"
+        return 1.0, "双龙"
+    return -1.0, "孤板"
 print("涨停梯队TOP:", dict(ind_cnt.sort_values(ascending=False).head(5)))
 
-# ===== 5. 逐只打分 =====
+# ===== 5. 逐只打分（连板共性条件） =====
 rows = []
+reject = 0
 if len(limit_today) == 0:
     print("今日无涨停数据（可能盘中/非交易日），正常退出")
 for r in limit_today.itertuples():
     code = r.ts_code
     try:
         h = cached(f'hist_{code}', lambda c=code: pro.daily(ts_code=c,
-            start_date=(pd.Timestamp.today()-pd.Timedelta(days=45)).strftime('%Y%m%d'),
+            start_date=(pd.Timestamp.today()-pd.Timedelta(days=90)).strftime('%Y%m%d'),
             end_date=TODAY).sort_values('trade_date').reset_index(drop=True), hours=1)
         if len(h) < 5:
             continue
         last = h.iloc[-1]
 
+        # 连板数
         lt = 0
         for i in range(len(h)-1, -1, -1):
             row = h.iloc[i]
@@ -191,82 +193,125 @@ for r in limit_today.itertuples():
         if lt == 0:
             lt = 1
 
-        s = 0.0
-        rs = []
-        mv = getattr(r, 'float_mv', None) or getattr(r, 'total_mv', None)
+        # ---- 连板共性原始数据 ----
+        mv_wan = getattr(r, 'float_mv', None) or getattr(r, 'total_mv', None)
+        mv = (mv_wan / 10000.0) if (mv_wan is not None and not pd.isna(mv_wan)) else None  # 万元→亿元
         tr = getattr(r, 'turnover_rate', None)
-        cl = getattr(r, 'close', 0)
+        cl = float(getattr(r, 'close', 0) or 0)
         try:
             vol_ma5 = h['vol'].tail(6).iloc[:-1].mean()
         except Exception:
             vol_ma5 = None
+        hi60 = h['high'].tail(60).max()
+        pos = (cl / hi60) if hi60 else 1.0          # 相对60日高点位置，越低越好
+        limit_gene = int((h['pct_chg'] >= 9.5).sum()) # 近60日涨停次数=股性
 
+        # ---- 硬过滤（不满足直接剔除，连板概率太低） ----
+        # 次新：历史不足40个交易日
+        if len(h) < 40:
+            reject += 1; continue
+        # 市值：20~100亿区间外剔除（太大拉不动、太小易被砸）
+        if mv is not None and not (15 <= mv <= 120):
+            reject += 1; continue
+        # 股价：>25元高位剔除
+        if cl > 25:
+            reject += 1; continue
+        # 换手：>40%爆量烂板剔除
+        if tr is not None and not pd.isna(tr) and tr > 40:
+            reject += 1; continue
+
+        s = 0.0
+        rs = []
+
+        # ① 封板形态（一字/秒封买不到，实体板最优）
         if last['open']==last['close']==last['high']==last['low']:
-            s += 2.0; rs.append("一字板")
+            s += 0.5; rs.append("一字(难买)")
         elif abs(last['open']-last['high'])<0.01 and abs(last['close']-last['high'])<0.01:
-            s += 1.6; rs.append("开盘秒板")
+            s += 1.6; rs.append("秒封")
         elif abs(last['close']-last['high'])<0.01:
-            s += 1.2; rs.append("光头板")
+            s += 1.4; rs.append("实体板")
         else:
-            s += 0.5; rs.append("普通板")
+            s += 0.4; rs.append("普通板")
 
-        if vol_ma5:
-            if last['vol'] < vol_ma5*0.8:
-                s += 1.5; rs.append("缩量惜售")
-            elif last['vol'] < vol_ma5*1.5:
-                s += 1.0
-            elif last['vol'] > vol_ma5*2.5:
-                s -= 0.5; rs.append("爆量分歧")
+        # ② 量能（温和放大2~3倍最佳，天量烂板扣分）
+        if vol_ma5 and vol_ma5 > 0:
+            vr = last['vol'] / vol_ma5
+            if 1.5 <= vr <= 3.0:
+                s += 1.5; rs.append(f"温和放量{vr:.1f}倍")
+            elif 1.0 <= vr < 1.5:
+                s += 1.0; rs.append("缩量惜售")
+            elif vr > 3.5:
+                s -= 0.5; rs.append(f"爆量{vr:.1f}倍")
 
+        # ③ 换手（首板10~25%最健康）
         if tr is not None and not pd.isna(tr):
             if 10 <= tr <= 25:
-                s += 1.0; rs.append("换手健康")
+                s += 1.2; rs.append("换手健康")
             elif 5 <= tr < 10:
                 s += 0.6
             elif 25 < tr <= 40:
-                s += 0.3
-            elif tr > 40:
-                s -= 0.5; rs.append("换手过大")
+                s += 0.2
 
+        # ④ 行业梯队（同题材≥3家才加分，孤板扣分）
         i_sc, i_rs = ind_score(getattr(r, 'industry', None))
         s += i_sc; rs.append(i_rs)
 
-        if mv is not None and not pd.isna(mv):
+        # ⑤ 市值（20~50亿黄金，50~80亿次优）
+        if mv is not None:
             if 20 <= mv <= 50:
-                s += 1.0; rs.append("黄金市值")
-            elif 8 <= mv < 20:
-                s += 0.7
-            elif 50 <= mv <= 100:
-                s += 0.4
-            elif mv > 100:
-                s -= 0.3; rs.append("盘子大")
-        if cl and cl > 20:
-            s -= 0.3
+                s += 1.0; rs.append(f"黄金市值{mv:.0f}亿")
+            elif 50 < mv <= 80:
+                s += 0.6
+            elif 80 < mv <= 120:
+                s += 0.2
 
+        # ⑥ 低位（股价距60日高点越远越安全，<0.85算低位）
+        if pos <= 0.80:
+            s += 1.0; rs.append(f"低位{pos*100:.0f}%")
+        elif pos <= 0.92:
+            s += 0.5
+        elif pos >= 0.99:
+            s -= 0.3; rs.append("高位")
+
+        # ⑦ 股性（近60日涨停≥3次=活跃股，接力意愿强）
+        if limit_gene >= 4:
+            s += 1.0; rs.append(f"股性活{limit_gene}次")
+        elif limit_gene >= 2:
+            s += 0.5
+
+        # ⑧ 均线多头（5/10/20逐层向上）
+        if len(h) >= 20:
+            ma5 = h['close'].tail(5).mean()
+            ma10 = h['close'].tail(10).mean()
+            ma20 = h['close'].tail(20).mean()
+            if last['close'] > ma5 > ma10 > ma20:
+                s += 1.0; rs.append("均线多头")
+            elif last['close'] > ma5 > ma20:
+                s += 0.5
+
+        # ⑨ 晋级位置（分阶段：首板看换手、二板看强度、三板+看梯队）
         if lt >= 4:
             s += 1.5; rs.append(f"{lt}板高标")
         elif lt == 3:
             s += 1.3; rs.append("3板")
         elif lt == 2:
-            s += 0.9; rs.append("2板")
+            s += 1.0; rs.append("2板(强度)")
         else:
-            s += 0.4; rs.append("首板")
+            s += 0.3; rs.append("首板")
 
-        if len(h) >= 20 and last['close'] > h['close'].tail(5).mean() > h['close'].tail(20).mean():
-            s += 1.0; rs.append("多头")
-
+        # ⑩ 市场环境
         s += mkt
 
         rows.append({'code': code, 'ind': getattr(r, 'industry', None),
-                     'close': round(float(cl), 2), 'lt': lt,
-                     'mv': round(float(mv)) if (mv is not None and not pd.isna(mv)) else 0,
+                     'close': round(cl, 2), 'lt': lt,
+                     'mv': round(mv) if mv else 0,
                      'score': round(min(max(s, 0), 10), 1), 'reason': '、'.join(rs)})
         time.sleep(1.2)
     except Exception as e:
         print(f"[跳过] {code}: {str(e)[:50]}")
         continue
 
-print("打分完成, 候选数:", len(rows))
+print(f"打分完成, 候选数: {len(rows)} (硬过滤剔除 {reject} 只)")
 top = sorted(rows, key=lambda x: -x['score'])[:3]
 
 # ===== 6. 推送 =====
@@ -287,7 +332,7 @@ def grade(sc):
 if token:
     try:
         if not top:
-            content = "<h3>📭 今日无连板候选</h3>"
+            content = "<h3>📭 今日无连板候选（硬过滤后为空）</h3>"
         else:
             rows_html = ""
             for i, x in enumerate(top, 1):
@@ -300,7 +345,7 @@ if token:
                 )
             content = (
                 f"<h3>🔥 连板晋级评分 · {TODAY}</h3>"
-                f"<p><small>涨停{limit_cnt}家 · {mkt_rs}｜候选{len(rows)}只｜非投资建议</small></p>"
+                f"<p><small>涨停{limit_cnt}家 · {mkt_rs}｜候选{len(rows)}只(过滤{reject})｜非投资建议</small></p>"
                 f"<table style='border-collapse:collapse;width:100%'>"
                 f"<tr style='background:#f2f2f2'>"
                 f"<th style='border:1px solid #ddd;padding:6px'>#</th>"
