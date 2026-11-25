@@ -1,12 +1,11 @@
 import os, time, json, traceback, tushare as ts, pandas as pd, requests
 
 print("TUSHARE_TOKEN 长度:", len(os.environ.get('TUSHARE_TOKEN','')))
-print("版本: 20261125-v6 (行业梯队 + 控频 + 推送写法同test_push)")
+print("版本: 20261125-v7 (浅缩进·无外层try·手机友好)")
 pro = ts.pro_api(os.environ.get('TUSHARE_TOKEN'))
 TODAY = time.strftime('%Y%m%d')
 CACHE = '.cache'; os.makedirs(CACHE, exist_ok=True)
 
-# ===== 内置行业映射（深市00x + 沪市60x 全覆盖） =====
 INDUSTRY_MAP = {
 "000001.SZ":"银行","000002.SZ":"房地产","000063.SZ":"通信设备","000066.SZ":"计算机设备",
 "000100.SZ":"光学光电子","000157.SZ":"工程机械","000333.SZ":"白色家电","000338.SZ":"汽车零部件",
@@ -39,10 +38,9 @@ INDUSTRY_MAP = {
 "002985.SZ":"军工","002987.SZ":"软件服务","002988.SZ":"工业金属","002990.SZ":"计算机设备",
 "002991.SZ":"休闲食品","002993.SZ":"消费电子","002996.SZ":"工业金属","002997.SZ":"汽车零部件",
 "003000.SZ":"休闲食品","003001.SZ":"专业工程","003002.SZ":"化学制品","003003.SZ":"包装印刷",
-"003005.SZ":"软件服务","003006.SZ":"个护用品","003008.SZ":"专业服务","003009.SZ":"航天装备",
-"003010.SZ":"互联网电商","003012.SZ":"建筑材料","003015.SZ":"光学光电子","003017.SZ":"化学制品",
-"003021.SZ":"自动化设备","003022.SZ":"化学原料","003024.SZ":"医疗器械","003025.SZ":"通用设备",
-"003026.SZ":"半导体","003028.SZ":"消费电子","003029.SZ":"软件服务","003030.SZ":"食品加工",
+"003005.SZ":"软件服务","003006.SZ":"个护用品","003009.SZ":"航天装备","003010.SZ":"互联网电商",
+"003012.SZ":"建筑材料","003015.SZ":"光学光电子","003021.SZ":"自动化设备","003022.SZ":"化学原料",
+"003024.SZ":"医疗器械","003025.SZ":"通用设备","003026.SZ":"半导体","003028.SZ":"消费电子",
 "600000.SH":"银行","600009.SH":"机场航运","600010.SH":"钢铁","600011.SH":"电力",
 "600015.SH":"银行","600016.SH":"银行","600018.SH":"港口航运","600019.SH":"钢铁",
 "600021.SH":"电力","600025.SH":"电力","600028.SH":"石化","600029.SH":"机场航运",
@@ -100,7 +98,6 @@ INDUSTRY_MAP = {
 }
 
 def cached(key, fetcher, hours=6):
-    """控频 + 限频重试 + 旧缓存兜底"""
     path = f'{CACHE}/{key}.pkl'
     if os.path.exists(path):
         age = (time.time()-os.path.getmtime(path))/3600
@@ -128,151 +125,166 @@ def cached(key, fetcher, hours=6):
         return pd.read_pickle(path)
     raise last_err
 
+# ===== 1. 当日行情 + 基础指标 =====
+df = cached(f'daily_{TODAY}', lambda: pro.daily(trade_date=TODAY), hours=2)
 try:
-    # ========= 1. 当日行情 + 基础指标 =========
-    df = cached(f'daily_{TODAY}', lambda: pro.daily(trade_date=TODAY), hours=2)
+    bk = cached(f'basic_{TODAY}', lambda: pro.daily_basic(trade_date=TODAY,
+        fields='ts_code,turnover_rate,volume_ratio,float_mv,total_mv'), hours=2)
+    df = df.merge(bk, on='ts_code', how='left')
+except Exception as e:
+    print("daily_basic 不可用:", e)
+
+# ===== 2. 筛主板（沪60x + 深00x）+ 挂行业 =====
+df['is_main'] = df['ts_code'].str.match(r'^(60[0-3]|00[0-3])')
+df = df[df['is_main']].copy()
+df['industry'] = df['ts_code'].map(INDUSTRY_MAP)
+print("主板股票数:", len(df), " 有行业标签:", int(df['industry'].notna().sum()))
+
+# ===== 3. 自算涨停 =====
+df['is_limit'] = (df['pct_chg'] >= 9.5) & (abs(df['close']-df['high']) < 0.01)
+limit_today = df[df['is_limit']].copy()
+print("今日主板涨停(自算):", len(limit_today))
+limit_cnt = len(limit_today)
+if limit_cnt > 80:
+    mkt, mkt_rs = 1.0, "情绪高潮"
+elif limit_cnt >= 50:
+    mkt, mkt_rs = 0.5, "情绪正常"
+elif limit_cnt < 40:
+    mkt, mkt_rs = -1.5, "情绪低迷"
+else:
+    mkt, mkt_rs = 0.0, "情绪中性"
+
+# ===== 4. 行业梯队 =====
+ind_cnt = limit_today.dropna(subset=['industry']).groupby('industry')['ts_code'].count()
+def ind_score(ind):
+    if pd.isna(ind) or ind not in ind_cnt.index:
+        return 0.0, "无梯队数据"
+    c = int(ind_cnt[ind])
+    if c >= 3:
+        return 2.0, f"梯队{c}家"
+    if c == 2:
+        return 1.2, "双龙"
+    return -0.8, "孤板"
+print("涨停梯队TOP:", dict(ind_cnt.sort_values(ascending=False).head(5)))
+
+# ===== 5. 逐只打分 =====
+rows = []
+if len(limit_today) == 0:
+    print("今日无涨停数据（可能盘中/非交易日），正常退出")
+for r in limit_today.itertuples():
+    code = r.ts_code
     try:
-        bk = cached(f'basic_{TODAY}', lambda: pro.daily_basic(trade_date=TODAY,
-            fields='ts_code,turnover_rate,volume_ratio,float_mv,total_mv'), hours=2)
-        df = df.merge(bk, on='ts_code', how='left')
-    except Exception as e:
-        print("daily_basic 不可用:", e)
-
-    # ========= 2. 筛主板（沪60x + 深00x）+ 挂行业 =========
-    df['is_main'] = df['ts_code'].str.match(r'^(60[0-3]|00[0-3])')
-    df = df[df['is_main']].copy()
-    df['industry'] = df['ts_code'].map(INDUSTRY_MAP)
-    print("主板股票数:", len(df), " 有行业标签:", int(df['industry'].notna().sum()))
-
-    # ========= 3. 自算涨停（不调 limit_list_d） =========
-    df['is_limit'] = (df['pct_chg'] >= 9.5) & (abs(df['close']-df['high']) < 0.01)
-    limit_today = df[df['is_limit']].copy()
-    print("今日主板涨停(自算):", len(limit_today))
-    limit_cnt = len(limit_today)
-    if limit_cnt > 80:      mkt, mkt_rs = 1.0, "情绪高潮"
-    elif limit_cnt >= 50:   mkt, mkt_rs = 0.5, "情绪正常"
-    elif limit_cnt < 40:    mkt, mkt_rs = -1.5, "情绪低迷"
-    else:                   mkt, mkt_rs = 0.0, "情绪中性"
-
-    # ========= 4. 行业梯队（只在当日涨停票内统计） =========
-    ind_cnt = limit_today.dropna(subset=['industry']).groupby('industry')['ts_code'].count()
-    def ind_score(ind):
-        if pd.isna(ind) or ind not in ind_cnt.index: return 0.0, "无梯队数据"
-        c = int(ind_cnt[ind])
-        if c >= 3: return 2.0, f"梯队{c}家"
-        if c == 2: return 1.2, "双龙"
-        return -0.8, "孤板"
-    print("涨停梯队TOP:", dict(ind_cnt.sort_values(ascending=False).head(5)))
-
-    if len(limit_today) == 0:
-        print("今日无涨停数据（可能盘中/非交易日），正常退出")
-        raise SystemExit(0)
-
-    # ========= 5. 逐只打分 =========
-    rows = []
-    for r in limit_today.itertuples():
-        code = r.ts_code
-        try:
-            h = cached(f'hist_{code}', lambda c=code: pro.daily(ts_code=c,
-                start_date=(pd.Timestamp.today()-pd.Timedelta(days=45)).strftime('%Y%m%d'),
-                end_date=TODAY).sort_values('trade_date').reset_index(drop=True), hours=1)
-            if len(h) < 5:
-                continue
-            last = h.iloc[-1]
-
-            lt = 0
-            for i in range(len(h)-1, -1, -1):
-                row = h.iloc[i]
-                if row['pct_chg'] >= 9.5 and abs(row['close']-row['high']) < 0.01:
-                    lt += 1
-                else:
-                    break
-            if lt == 0:
-                lt = 1
-
-            s = 0.0; rs = []
-            mv = getattr(r, 'float_mv', None) or getattr(r, 'total_mv', None)
-            tr = getattr(r, 'turnover_rate', None)
-            cl = getattr(r, 'close', 0)
-            try:
-                vol_ma5 = h['vol'].tail(6).iloc[:-1].mean()
-            except Exception:
-                vol_ma5 = None
-
-            # ① 封板形态
-            if last['open']==last['close']==last['high']==last['low']:
-                s += 2.0; rs.append("一字板")
-            elif abs(last['open']-last['high'])<0.01 and abs(last['close']-last['high'])<0.01:
-                s += 1.6; rs.append("开盘秒板")
-            elif abs(last['close']-last['high'])<0.01:
-                s += 1.2; rs.append("光头板")
-            else:
-                s += 0.5; rs.append("普通板")
-
-            # ② 量能
-            if vol_ma5:
-                if last['vol'] < vol_ma5*0.8:    s += 1.5; rs.append("缩量惜售")
-                elif last['vol'] < vol_ma5*1.5:  s += 1.0
-                elif last['vol'] > vol_ma5*2.5:  s -= 0.5; rs.append("爆量分歧")
-
-            # ③ 换手
-            if tr is not None and not pd.isna(tr):
-                if 10 <= tr <= 25:     s += 1.0; rs.append("换手健康")
-                elif 5 <= tr < 10:     s += 0.6
-                elif 25 < tr <= 40:    s += 0.3
-                elif tr > 40:          s -= 0.5; rs.append("换手过大")
-
-            # ④ 行业梯队
-            i_sc, i_rs = ind_score(getattr(r, 'industry', None))
-            s += i_sc; rs.append(i_rs)
-
-            # ⑤ 市值
-            if mv is not None and not pd.isna(mv):
-                if 20 <= mv <= 50:     s += 1.0; rs.append("黄金市值")
-                elif 8 <= mv < 20:     s += 0.7
-                elif 50 <= mv <= 100:  s += 0.4
-                elif mv > 100:         s -= 0.3; rs.append("盘子大")
-            if cl and cl > 20:
-                s -= 0.3
-
-            # ⑥ 晋级位置
-            if lt >= 4:       s += 1.5; rs.append(f"{lt}板高标")
-            elif lt == 3:     s += 1.3; rs.append("3板")
-            elif lt == 2:     s += 0.9; rs.append("2板")
-            else:             s += 0.4; rs.append("首板")
-
-            # ⑦ 均线多头
-            if len(h) >= 20 and last['close'] > h['close'].tail(5).mean() > h['close'].tail(20).mean():
-                s += 1.0; rs.append("多头")
-
-            # ⑧ 市场环境
-            s += mkt
-
-            rows.append({'code': code, 'ind': getattr(r, 'industry', None),
-                         'close': round(float(cl), 2), 'lt': lt,
-                         'mv': round(float(mv)) if (mv is not None and not pd.isna(mv)) else 0,
-                         'score': round(min(max(s, 0), 10), 1), 'reason': '、'.join(rs)})
-            time.sleep(1.2)
-        except Exception as e:
-            print(f"[跳过] {code}: {str(e)[:50]}")
+        h = cached(f'hist_{code}', lambda c=code: pro.daily(ts_code=c,
+            start_date=(pd.Timestamp.today()-pd.Timedelta(days=45)).strftime('%Y%m%d'),
+            end_date=TODAY).sort_values('trade_date').reset_index(drop=True), hours=1)
+        if len(h) < 5:
             continue
+        last = h.iloc[-1]
 
-    print("打分完成, 候选数:", len(rows))
-    top = sorted(rows, key=lambda x: -x['score'])[:3]
+        lt = 0
+        for i in range(len(h)-1, -1, -1):
+            row = h.iloc[i]
+            if row['pct_chg'] >= 9.5 and abs(row['close']-row['high']) < 0.01:
+                lt += 1
+            else:
+                break
+        if lt == 0:
+            lt = 1
 
-    # ========= 6. 推送（写法与 test_push.py 一致，已验证 code:200） =========
-    token = os.environ.get('PUSHPLUS_TOKEN')
-    print("PUSHPLUS_TOKEN 长度:", len(token) if token else 0)
-    if not token:
-        print("!! 未配置 PUSHPLUS_TOKEN")
-        raise SystemExit(0)
+        s = 0.0
+        rs = []
+        mv = getattr(r, 'float_mv', None) or getattr(r, 'total_mv', None)
+        tr = getattr(r, 'turnover_rate', None)
+        cl = getattr(r, 'close', 0)
+        try:
+            vol_ma5 = h['vol'].tail(6).iloc[:-1].mean()
+        except Exception:
+            vol_ma5 = None
 
-    def grade(sc):
-        if sc >= 8:   return "🟢 重仓可上"
-        if sc >= 6.5: return "🟡 正常仓位"
-        if sc >= 5:   return "🟠 轻仓试错"
-        return "⚪ 空仓别上"
+        if last['open']==last['close']==last['high']==last['low']:
+            s += 2.0; rs.append("一字板")
+        elif abs(last['open']-last['high'])<0.01 and abs(last['close']-last['high'])<0.01:
+            s += 1.6; rs.append("开盘秒板")
+        elif abs(last['close']-last['high'])<0.01:
+            s += 1.2; rs.append("光头板")
+        else:
+            s += 0.5; rs.append("普通板")
 
+        if vol_ma5:
+            if last['vol'] < vol_ma5*0.8:
+                s += 1.5; rs.append("缩量惜售")
+            elif last['vol'] < vol_ma5*1.5:
+                s += 1.0
+            elif last['vol'] > vol_ma5*2.5:
+                s -= 0.5; rs.append("爆量分歧")
+
+        if tr is not None and not pd.isna(tr):
+            if 10 <= tr <= 25:
+                s += 1.0; rs.append("换手健康")
+            elif 5 <= tr < 10:
+                s += 0.6
+            elif 25 < tr <= 40:
+                s += 0.3
+            elif tr > 40:
+                s -= 0.5; rs.append("换手过大")
+
+        i_sc, i_rs = ind_score(getattr(r, 'industry', None))
+        s += i_sc; rs.append(i_rs)
+
+        if mv is not None and not pd.isna(mv):
+            if 20 <= mv <= 50:
+                s += 1.0; rs.append("黄金市值")
+            elif 8 <= mv < 20:
+                s += 0.7
+            elif 50 <= mv <= 100:
+                s += 0.4
+            elif mv > 100:
+                s -= 0.3; rs.append("盘子大")
+        if cl and cl > 20:
+            s -= 0.3
+
+        if lt >= 4:
+            s += 1.5; rs.append(f"{lt}板高标")
+        elif lt == 3:
+            s += 1.3; rs.append("3板")
+        elif lt == 2:
+            s += 0.9; rs.append("2板")
+        else:
+            s += 0.4; rs.append("首板")
+
+        if len(h) >= 20 and last['close'] > h['close'].tail(5).mean() > h['close'].tail(20).mean():
+            s += 1.0; rs.append("多头")
+
+        s += mkt
+
+        rows.append({'code': code, 'ind': getattr(r, 'industry', None),
+                     'close': round(float(cl), 2), 'lt': lt,
+                     'mv': round(float(mv)) if (mv is not None and not pd.isna(mv)) else 0,
+                     'score': round(min(max(s, 0), 10), 1), 'reason': '、'.join(rs)})
+        time.sleep(1.2)
+    except Exception as e:
+        print(f"[跳过] {code}: {str(e)[:50]}")
+        continue
+
+print("打分完成, 候选数:", len(rows))
+top = sorted(rows, key=lambda x: -x['score'])[:3]
+
+# ===== 6. 推送 =====
+token = os.environ.get('PUSHPLUS_TOKEN')
+print("PUSHPLUS_TOKEN 长度:", len(token) if token else 0)
+if not token:
+    print("!! 未配置 PUSHPLUS_TOKEN")
+
+def grade(sc):
+    if sc >= 8:
+        return "🟢 重仓可上"
+    if sc >= 6.5:
+        return "🟡 正常仓位"
+    if sc >= 5:
+        return "🟠 轻仓试错"
+    return "⚪ 空仓别上"
+
+if token:
     try:
         if not top:
             content = "<h3>📭 今日无连板候选</h3>"
@@ -313,146 +325,4 @@ try:
         print("!!! 推送环节报错 !!!")
         traceback.print_exc()
 
-    print("==== 全部完成 ====")
-
-except Exception as e:
-    print("!!! 顶层异常 !!!")
-    traceback.print_exc()
-    raise
-f len(h) < 5:
-                continue
-            last = h.iloc[-1]
-
-            # 连板数：往前连续数涨停
-            lt = 0
-            for i in range(len(h)-1, -1, -1):
-                row = h.iloc[i]
-                if row['pct_chg'] >= 9.5 and abs(row['close']-row['high']) < 0.01:
-                    lt += 1
-                else:
-                    break
-            if lt == 0:
-                lt = 1
-
-            s = 0.0; rs = []
-            mv = getattr(r, 'float_mv', None) or getattr(r, 'total_mv', None)
-            tr = getattr(r, 'turnover_rate', None)
-            cl = getattr(r, 'close', 0)
-            try:
-                vol_ma5 = h['vol'].tail(6).iloc[:-1].mean()
-            except Exception:
-                vol_ma5 = None
-
-            # ① 封板形态 0~2.0
-            if last['open']==last['close']==last['high']==last['low']:
-                s += 2.0; rs.append("一字板")
-            elif abs(last['open']-last['high'])<0.01 and abs(last['close']-last['high'])<0.01:
-                s += 1.6; rs.append("开盘秒板")
-            elif abs(last['close']-last['high'])<0.01:
-                s += 1.2; rs.append("光头板")
-            else:
-                s += 0.5; rs.append("普通板")
-
-            # ② 量能 0~1.5
-            if vol_ma5:
-                if last['vol'] < vol_ma5*0.8:    s += 1.5; rs.append("缩量惜售")
-                elif last['vol'] < vol_ma5*1.5:  s += 1.0
-                elif last['vol'] > vol_ma5*2.5:  s -= 0.5; rs.append("爆量分歧")
-
-            # ③ 换手 0~1.0
-            if tr is not None and not pd.isna(tr):
-                if 10 <= tr <= 25:     s += 1.0; rs.append("换手健康")
-                elif 5 <= tr < 10:     s += 0.6
-                elif 25 <= tr <= 40:   s += 0.3
-                elif tr > 40:          s -= 0.5; rs.append("换手过大")
-
-            # ④ 行业梯队 -0.8 ~ +2.0
-            i_sc, i_rs = ind_score(getattr(r, 'industry', None))
-            s += i_sc; rs.append(i_rs)
-
-            # ⑤ 市值 0~1.0
-            if mv is not None and not pd.isna(mv):
-                if 20 <= mv <= 50:     s += 1.0; rs.append("黄金市值")
-                elif 8 <= mv < 20:     s += 0.7
-                elif 50 <= mv <= 100:  s += 0.4
-                elif mv > 100:         s -= 0.3; rs.append("盘子大")
-            if cl and cl > 20:
-                s -= 0.3
-
-            # ⑥ 晋级位置 0~1.5
-            if lt >= 4:       s += 1.5; rs.append(f"{lt}板高标")
-            elif lt == 3:     s += 1.3; rs.append("3板")
-            elif lt == 2:     s += 0.9; rs.append("2板")
-            else:             s += 0.4; rs.append("首板")
-
-            # ⑦ 均线多头 0~1.0
-            if len(h) >= 20 and last['close'] > h['close'].tail(5).mean() > h['close'].tail(20).mean():
-                s += 1.0; rs.append("多头")
-
-            # ⑧ 市场环境
-            s += mkt
-
-            rows.append({'code': code, 'ind': getattr(r, 'industry', None),
-                         'close': round(float(cl), 2), 'lt': lt,
-                         'mv': round(float(mv), 0) if (mv is not None and not pd.isna(mv)) else 0,
-                         'score': round(min(max(s, 0), 10), 1), 'reason': '、'.join(rs)})
-            time.sleep(1.2)          # 逐只限速，防 50次/分钟
-        except Exception as e:
-            print(f"[跳过] {code}: {str(e)[:50]}")
-            continue
-
-    print("打分完成, 候选数:", len(rows))
-    top = sorted(rows, key=lambda x: -x['score'])[:3]
-
-    # ========= 6. 推送（单独抓错，崩了也看得见真因） =========
-    token = os.environ.get('PUSHPLUS_TOKEN')
-    print("PUSHPLUS_TOKEN 长度:", len(token) if token else 0)
-    if not token:
-        print("!! 未配置 PUSHPLUS_TOKEN，跳过推送（去仓库 Settings→Secrets 补上即可）")
-        raise SystemExit(0)
-
-    def grade(sc):
-        if sc >= 8:   return "🟢 重仓可上"
-        if sc >= 6.5: return "🟡 正常仓位"
-        if sc >= 5:   return "🟠 轻仓试错"
-        return "⚪ 空仓别上"
-
-    try:
-        if not top:
-            content = "<h3>📭 今日无连板候选</h3>"
-        else:
-            body = ""
-            for i, x in enumerate(top, 1):
-                nm = x['ind'] if (x['ind'] and not pd.isna(x['ind'])) else x['code']
-                body += f"""<tr><td>{i}</td><td>{nm}<br><small>{x['code']}</small></td>
-                <td>{x['close']}</td><td>{x['lt']}板</td><td>{x['mv']}亿</td>
-                <td><b>{x['score']}</b></td><td>{grade(x['score'])}</td><td>{x['reason']}</td></tr>"""
-            content = f"""
-            <h3>🔥 连板晋级评分 · {TODAY}</h3>
-            <p><small>涨停{limit_cnt}家 · {mkt_rs}（v5：内置行业梯队 + 零 stock_basic + 控频）<br>
-            评分：≥8重仓 / 6.5-8正常 / 5-6.5轻仓 / &lt;5空仓<br>
-            候选{len(rows)}只，仅供形态参考，非投资建议</small></p>
-            <div style="overflow-x:auto;">
-            <style>table{{border-collapse:collapse;width:100%}}
-            th,td{{border:1px solid #ddd;padding:6px;text-align:center;font-size:12px;white-space:normal;word-break:break-all}}
-            th{{background:#f2f2f2}}</style>
-            <table>
-            <tr><th>#</th><th>股票/行业</th><th>收盘</th><th>连板</th><th>市值</th><th>分</th><th>建议</th><th>理由</th></tr>
-            {body}</table></div>"""
-        resp = requests.post("https://www.pushplus.plus/send",
-                             headers={'Content-Type': 'application/json'},
-                             data=json.dumps({"token": token,
-                                              "title": f"🔥 连板评分 · {TODAY} · {len(top)}只",
-                                              "content": content, "template": "html"}).encode('utf-8'),
-                             timeout=15)
-        print("推送状态:", resp.status_code, resp.text[:120])
-    except Exception as pe:
-        print("!!! 推送环节报错 !!!")
-        traceback.print_exc()
-
-    print("==== 全部完成 ====")
-
-except Exception as e:
-    print("!!! 顶层异常 !!!")
-    traceback.print_exc()
-    raise
+print("==== 全部完成 ====")
